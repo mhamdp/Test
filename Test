@@ -1,0 +1,204 @@
+import streamlit as st
+import random
+import time
+import sys
+import matplotlib.pyplot as plt
+import requests
+import pyttsx3
+import speech_recognition as sr
+import streamlit_lottie as st_lottie
+
+st.set_page_config(page_title="File Organization Simulation", layout="wide")
+
+st.title("File Organization Simulation")
+st.markdown("### A modern interactive web version with AI assistant")
+st.markdown("---")
+
+class SequentialFile:
+    def __init__(self):
+        self.records = []
+
+    def insert(self, record):
+        self.records.append(record)
+        self.records.sort(key=lambda x: x['id'])
+
+    def search(self, record_id):
+        for rec in self.records:
+            if rec['id'] == record_id:
+                return rec
+        return None
+
+class IndexedFile:
+    def __init__(self):
+        self.records = {}
+        self.index = {}
+
+    def insert(self, record):
+        self.records[record['id']] = record
+        self.index[record['id']] = len(self.records) - 1
+
+    def search(self, record_id):
+        return self.records.get(record_id, None)
+
+class HashFile:
+    def __init__(self, size=1000):
+        self.size = size
+        self.table = [None]*size
+
+    def hash_function(self, key):
+        return key % self.size
+
+    def insert(self, record):
+        idx = self.hash_function(record['id'])
+        self.table[idx] = record
+
+    def search(self, record_id):
+        idx = self.hash_function(record_id)
+        if self.table[idx] and self.table[idx]['id'] == record_id:
+            return self.table[idx]
+        return None
+
+class BTreeFile:
+    def __init__(self):
+        self.tree = {}
+
+    def insert(self, record):
+        self.tree[record['id']] = record
+
+    def search(self, record_id):
+        return self.tree.get(record_id, None)
+
+def measure_access_time(file_obj, record_id):
+    start = time.time()
+    file_obj.search(record_id)
+    return time.time() - start
+
+def measure_memory(file_obj):
+    return sys.getsizeof(file_obj)
+
+def load_lottieurl(url: str):
+    r = requests.get(url)
+    if r.status_code != 200:
+        return None
+    return r.json()
+
+lottie_listen = load_lottieurl("https://assets7.lottiefiles.com/packages/lf20_t9gkkhz4.json")
+
+tab1, tab2, tab3 = st.tabs(["Manage Files", "Performance Test", "AI Assistant"])
+
+with tab1:
+    st.header("Create / Use File")
+    file_type = st.selectbox("Select file organization", ["Sequential","Indexed","Hash","B-Tree"])
+    if 'file_obj' not in st.session_state:
+        st.session_state['file_obj'] = None
+        st.session_state['count'] = 0
+
+    if st.button("Create File"):
+        if file_type == "Sequential":
+            st.session_state['file_obj'] = SequentialFile()
+        elif file_type == "Indexed":
+            st.session_state['file_obj'] = IndexedFile()
+        elif file_type == "Hash":
+            st.session_state['file_obj'] = HashFile(size=5000)
+        else:
+            st.session_state['file_obj'] = BTreeFile()
+        st.session_state['count'] = 0
+        st.success(f"{file_type} file created!")
+
+    st.subheader("Insert / Search Records")
+    with st.expander("Insert Record"):
+        rec_id = st.number_input("Record ID", min_value=0, step=1, value=0)
+        rec_name = st.text_input("Record Name", value="")
+        if st.button("Insert"):
+            if st.session_state['file_obj'] is None:
+                st.error("Create a file first")
+            else:
+                rec = {"id": int(rec_id), "name": rec_name}
+                st.session_state['file_obj'].insert(rec)
+                st.session_state['count'] += 1
+                st.success(f"Inserted record id={rec_id}. Total: {st.session_state['count']}")
+
+    with st.expander("Search Record"):
+        search_id = st.number_input("Search by ID", min_value=0, step=1, value=0, key="search_id")
+        if st.button("Search"):
+            if st.session_state['file_obj'] is None:
+                st.error("Create a file first")
+            else:
+                t0 = time.time()
+                res = st.session_state['file_obj'].search(int(search_id))
+                t1 = time.time()
+                if res:
+                    st.info(f"Found: {res} â Access time: {t1-t0:.6f} sec")
+                else:
+                    st.warning("Not found")
+
+with tab2:
+    st.header("Performance Comparison")
+    num_records = st.slider("Number of records to insert for test", 100, 2000, 500, step=100)
+    if st.button("Run comparison"):
+        methods = ["Sequential","Indexed","Hash","B-Tree"]
+        results = {}
+        for method in methods:
+            if method == "Sequential":
+                f = SequentialFile()
+            elif method == "Indexed":
+                f = IndexedFile()
+            elif method == "Hash":
+                f = HashFile(size=max(1000, num_records*3))
+            else:
+                f = BTreeFile()
+
+            for i in range(num_records):
+                rec = {"id": i, "name": f"Name{i}"}
+                f.insert(rec)
+
+            rand_id = random.randint(0, num_records-1)
+            access_time = measure_access_time(f, rand_id)
+            memory_usage = measure_memory(f)
+            results[method] = {"time": access_time, "memory": memory_usage}
+
+        st.subheader("Results (single random access)")
+        st.write(results)
+
+        methods_list = list(results.keys())
+        times = [results[m]['time'] for m in methods_list]
+        mems = [results[m]['memory'] for m in methods_list]
+
+        fig1, ax1 = plt.subplots()
+        ax1.bar(methods_list, times, color='skyblue')
+        ax1.set_title("Access Time (sec)")
+        ax1.set_ylabel("Seconds")
+        st.pyplot(fig1)
+
+        fig2, ax2 = plt.subplots()
+        ax2.bar(methods_list, mems, color='lightgreen')
+        ax2.set_title("Memory Usage (bytes)")
+        st.pyplot(fig2)
+
+with tab3:
+    st.header("AI Assistant")
+    st.markdown("Chat or speak to the AI. It will respond with text and voice.")
+    
+    if st.button("Start Listening"):
+        st_lottie.st_lottie(lottie_listen, height=200)
+        recognizer = sr.Recognizer()
+        with sr.Microphone() as source:
+            st.info("Listening...")
+            audio = recognizer.listen(source, phrase_time_limit=5)
+            try:
+                query = recognizer.recognize_google(audio)
+                st.success(f"You said: {query}")
+
+                response = f"AI reply to: {query}"
+                st.info(response)
+
+                engine = pyttsx3.init()
+                engine.say(response)
+                engine.runAndWait()
+            except:
+                st.warning("Could not recognize your voice.")
+
+st.markdown("---")
+st.markdown("**Project done by:**")
+st.markdown("Mohamed Bahaa")
+st.markdown("Rotaj Mohamed")
